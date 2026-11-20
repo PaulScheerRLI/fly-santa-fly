@@ -28,7 +28,7 @@ def watch(request):
     return render(request, "santa.html")
 
 
-players = dict()  # ip -> player is jumping
+players = dict()  # ip -> position [-1, 1]
 
 class Consumer(AsyncWebsocketConsumer):
 
@@ -43,7 +43,7 @@ class Consumer(AsyncWebsocketConsumer):
             # player joined: send message to santa
             await self.channel_layer.group_send("santa", {"type": "msg", "message": {
                 "players": len(players),
-                "jumping": sum(players.values()),
+                "position": sum(players.values()) / len(players),
             }})
         await self.accept()
 
@@ -56,20 +56,16 @@ class Consumer(AsyncWebsocketConsumer):
             await self.channel_layer.group_discard('players', self.channel_name)
             await self.channel_layer.group_send("santa", {"type": "msg", "message": {
                 "players": len(players),
-                "jumping": sum(players.values()),
+                "position": sum(players.values()) / max(len(players), 1),
             }})
 
     async def receive(self, text_data):
         # receive message from websocket
-        players[self] = json.loads(text_data)["action"] == "jump"  # "jump" or ""
+        players[self] = json.loads(text_data)["pos"]
         await self.channel_layer.group_send("santa", {"type": "msg", "message": {
             "players": len(players),
-            "jumping": sum(players.values()),
+            "position": sum(players.values()) / len(players),
         }})
-        # await self.channel_layer.group_send("santa", {"type": "jump"})
-
-    # async def jump(self, event):
-        # await self.send(text_data="jump")
 
     async def msg(self, message):
         await self.send(text_data=json.dumps(message["message"]))

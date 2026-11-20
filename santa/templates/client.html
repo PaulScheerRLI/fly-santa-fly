@@ -2,42 +2,73 @@
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>Run, Santa, Run!</title>
+  <title>Fly, Santa, Fly!</title>
 </head>
-<body>
-  <div style="min-height:95vh; height:95vh; max-height:95vh;">
-    <button id="btn" style="width:100%; height:100%;">
-      Jump!
-    </button>
-  </div>
+<body style="background:black">
+  <main>
+    <div id="obj" style="background:red; position:fixed; top:50vh; left:50vw; height:10vh; width:10vh; border-radius:100%"></div>
+    <div id="debug" style="color:white; display:flex; justify-content:center"></div>
+  </main>
 
   <script>
-      const ws_scheme = (window.location.protocol == 'https:') ? 'wss' : 'ws';
-      const ws = new WebSocket(ws_scheme+'://' + window.location.host + '/ws/');
-    const btn = document.getElementById('btn');
-    btn.onmousedown = down;
-    btn.onmouseup = up;
-    // mobile: no mouse, but touch events
-    btn.ontouchstart = down;
-    btn.ontouchend = up;
+    const ws_scheme = (window.location.protocol == 'https:') ? 'wss' : 'ws';
+    const ws = new WebSocket(ws_scheme+'://' + window.location.host + '/ws/');
+    const obj = document.getElementById('obj');
+    const debug = document.getElementById('debug');
+    const FREQ = 10;  // How often to send position to server
+    const MAX_BETA = 25.0;  // max angle of screen
+    const LPF = 25;  // low pass filter value. The higher, the more sluggish
+    const MAX_WIDTH = obj.parentElement.clientWidth*0.95;  // window width
+    var pos = 0;  // y position on screen, [-1, 1]
+
+    if (window.DeviceOrientationEvent) {
+      window.addEventListener("deviceorientation", event => {
+        let y = event.beta;
+        // scale beta [-180, 180], usually [-25, 25], to [-1, 1]
+        y = Math.min(Math.max(y, -MAX_BETA), MAX_BETA) / MAX_BETA;
+        // low pass filter pos
+        pos += (y - pos) / LPF;
+        // move obj on screen
+        obj.style.left = ((pos + 1) / 2) * 85 + 5 + 'vw';  // [-1,1] -> [5,90]
+        //debug.textContent = event.beta.toFixed(3) + ' | ' + y.toFixed(3) + ' | ' + pos.toFixed(3) + ' | ' + obj.style.left;
+      }, true);
+    }
+
+    // fallback: drag obj directly
+    var startDragX = null;
+    obj.onmousedown = e => {
+      e.preventDefault();
+      startDragX = e.clientX;
+      document.onmouseup = _ => {
+        document.onmouseup = null;
+        document.onmousemove = null;
+      };
+      document.onmousemove = e => {
+        e.preventDefault();
+        let dx = e.clientX - startDragX;
+        startDragX = e.clientX;
+        let newX = obj.offsetLeft + dx;
+        newX = Math.min(Math.max(newX, 0), MAX_WIDTH);
+        obj.style.left = newX + 'px';
+        pos = (newX / MAX_WIDTH) * 2 - 1;
+      };
+    };
+
     // mobile: long click opens context menu
-    btn.oncontextmenu = e => {
+    obj.oncontextmenu = e => {
       event.preventDefault();
       event.stopPropagation();
       return false;
     };
 
-    function down(e) {
-      ws.send('{"action": "jump"}');
-      e.preventDefault();
-      e.target.style.backgroundColor = 'darkblue';
-    }
-
-    function up(e) {
-      ws.send('{"action": ""}');
-      e.preventDefault();
-      e.target.style.backgroundColor = '';
-    }
+    // periodically send pos to server
+    var sender = setInterval(_ => {
+      try {
+        ws.send('{"pos":'+ pos.toFixed(2) + '}');
+      } catch {
+        clearInterval(sender);
+      }
+    }, 1000/FREQ);
 
     ws.onclose = e => {console.log("Error: socket closed unexpectedly", e);};
   </script>
