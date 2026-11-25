@@ -6,16 +6,17 @@
 </head>
 <body style="background:black">
   <main>
-    <div id="obj" style="background:red; position:fixed; top:50vh; left:50vw; height:10vh; width:10vh; border-radius:100%"></div>
+    <div id="obj" style="background:red; position:fixed; top:50vh; left:50vw; height:10vh; width:10vh; border-radius:0%"></div>
     <div id="debug" style="color:white; display:flex; justify-content:center"></div>
   </main>
 
   <script>
+    var ws;  // websocket to send position to
+    var sender;  // periodic sender interval
     const ws_scheme = (window.location.protocol == 'https:') ? 'wss' : 'ws';
-    const ws = new WebSocket(ws_scheme+'://' + window.location.host + '/ws/');
     const obj = document.getElementById('obj');
     const debug = document.getElementById('debug');
-    const FREQ = 10;  // How often to send position to server
+    const FREQ = {{ freq }};  // How often to send position to server
     const MAX_BETA = 25.0;  // max angle of screen
     const LPF = 25;  // low pass filter value. The higher, the more sluggish
     const MAX_WIDTH = obj.parentElement.clientWidth*0.95;  // window width
@@ -24,12 +25,17 @@
     if (window.DeviceOrientationEvent) {
       window.addEventListener("deviceorientation", event => {
         let y = event.beta;
+        if (y > 90)
+          y = 180 - y;  // screen overhead
+        else if (y < -90)
+          y = -180 - y;
         // scale beta [-180, 180], usually [-25, 25], to [-1, 1]
         y = Math.min(Math.max(y, -MAX_BETA), MAX_BETA) / MAX_BETA;
         // low pass filter pos
         pos += (y - pos) / LPF;
         // move obj on screen
         obj.style.left = ((pos + 1) / 2) * 85 + 5 + 'vw';  // [-1,1] -> [5,90]
+        obj.style.rotate = (360 * pos) + 'deg';
         //debug.textContent = event.beta.toFixed(3) + ' | ' + y.toFixed(3) + ' | ' + pos.toFixed(3) + ' | ' + obj.style.left;
       }, true);
     }
@@ -49,8 +55,9 @@
         startDragX = e.clientX;
         let newX = obj.offsetLeft + dx;
         newX = Math.min(Math.max(newX, 0), MAX_WIDTH);
-        obj.style.left = newX + 'px';
         pos = (newX / MAX_WIDTH) * 2 - 1;
+        obj.style.left = newX + 'px';
+        obj.style.rotate = (360 * pos) + 'deg';
       };
     };
 
@@ -61,14 +68,33 @@
       return false;
     };
 
-    // periodically send pos to server
-    var sender = setInterval(_ => {
-      try {
-        ws.send('{"pos":'+ pos.toFixed(2) + '}');
-      } catch {
-        clearInterval(sender);
+    function connect(backoff=100, max=10000) {
+      ws = new WebSocket(ws_scheme+'://' + window.location.host + '/ws/');
+
+      ws.onopen = _ => {
+        // periodically send pos to server
+        sender = setInterval(_ => {
+          try {
+            ws.send(pos.toFixed(2));
+          } catch {
+            // sending went wrong: try to reconnect
+            console.error('WS send failed, trying to reconnect');
+            clearInterval(sender);
+            connect();
+          }
+        }, 1000/FREQ);
       }
-    }, 1000/FREQ);
+
+      ws.onclose = _ => {
+        clearInterval(sender);
+        console.error('WS closed, trying to reconnect after ' + backoff + 'ms');
+        setTimeout(_ => {
+          connect(Math.min(backoff * 2, max));
+        }, backoff);
+      }
+    }
+    connect();
+
 
     ws.onclose = e => {console.log("Error: socket closed unexpectedly", e);};
   </script>

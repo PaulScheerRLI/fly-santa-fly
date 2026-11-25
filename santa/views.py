@@ -9,7 +9,7 @@ import json
 import socket
 
 def connect(request):
-    return render(request, "client.html")
+    return render(request, "client.html", {"freq": settings.CLIENT_FREQ})
 
 def lobby(request):
     if not settings.IP:
@@ -22,13 +22,17 @@ def lobby(request):
         s.close()
     else:
         ip = settings.IP
-    return render(request, 'lobby.html', {'ip': ip, 'port': settings.PORT})
+    return render(request, 'lobby.html', {
+        'ip': ip, 'port': settings.PORT,
+        'freq': settings.SERVER_FREQ,
+    })
 
 def watch(request):
     return render(request, "santa.html")
 
 
 players = dict()  # ip -> position [-1, 1]
+
 
 class Consumer(AsyncWebsocketConsumer):
 
@@ -41,10 +45,6 @@ class Consumer(AsyncWebsocketConsumer):
             players[self] = False
             await self.channel_layer.group_add("players", self.channel_name)
             # player joined: send message to santa
-            await self.channel_layer.group_send("santa", {"type": "msg", "message": {
-                "players": len(players),
-                "position": sum(players.values()) / len(players),
-            }})
         await self.accept()
 
     async def disconnect(self, close_code):
@@ -54,18 +54,18 @@ class Consumer(AsyncWebsocketConsumer):
         else:
             players.pop(self, None)
             await self.channel_layer.group_discard('players', self.channel_name)
+
+    async def receive(self, text_data):
+        # receive message from websocket
+        if self.is_santa:
+            # send update to santa
             await self.channel_layer.group_send("santa", {"type": "msg", "message": {
                 "players": len(players),
                 "position": sum(players.values()) / max(len(players), 1),
             }})
-
-    async def receive(self, text_data):
-        # receive message from websocket
-        players[self] = json.loads(text_data)["pos"]
-        await self.channel_layer.group_send("santa", {"type": "msg", "message": {
-            "players": len(players),
-            "position": sum(players.values()) / len(players),
-        }})
+        else:
+            # update player info
+            players[self] = float(text_data)
 
     async def msg(self, message):
         await self.send(text_data=json.dumps(message["message"]))

@@ -50,7 +50,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'santa.apps.SantaConfig',
-    # 'channels',
+    'channels',
 ]
 
 MIDDLEWARE = [
@@ -102,6 +102,10 @@ CHANNEL_LAYERS = {
         },
     },
 }
+
+# game logic
+CLIENT_FREQ = env.int('CLIENT_FREQ', 5)  # each client sends this many updates per second
+SERVER_FREQ = env.int('SERVER_FREQ', 25)  # the game updates position this many times per second
 
 # Database
 # https://docs.djangoproject.com/en/4.1/ref/settings/#databases

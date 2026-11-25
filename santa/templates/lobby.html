@@ -94,25 +94,54 @@
   <audio id="lobby-background-audio" src={% static "audio/lobby_background.mp3"%}></audio>
 
   <script>
-    var should_jump = false;
-    var is_jumping = false;
     var num_players = 0;
+    const FREQ = {{ freq }};
     const ws_scheme = (window.location.protocol == 'https:') ? 'wss' : 'ws';
-    const ws = new WebSocket(ws_scheme +'://' + window.location.host + '/ws/santa/');
-    ws.onclose = e => {console.log("Error: socket closed unexpectedly", e);};
-    ws.onmessage = m => {
-      //console.log(m);
-      let data = JSON.parse(m.data)
-      let pos = data["position"];
-      let players = data["players"];
-      document.getElementById("avg_pos").textContent = pos.toFixed(2);
-      document.getElementById("num_players").textContent = players + "";
-      if (players > num_players) {
-        // player joined: play sound
-        window.dispatchEvent(new CustomEvent("LobbyJoin"));
+    var ws;
+    var sender;
+
+    function connect(backoff=100, max=10000) {
+      ws = new WebSocket(ws_scheme+'://' + window.location.host + '/ws/santa/');
+
+      ws.onopen = _ => {
+        // periodically poll user data from server
+        sender = setInterval(_ => {
+          try {
+            ws.send('');
+          } catch {
+            // sending went wrong: try to reconnect
+            console.error('WS send failed, trying to reconnect');
+            clearInterval(sender);
+            connect();  // resets backoff
+          }
+        }, 1000/FREQ);
       }
-      num_players = players;
-    };
+
+      ws.onmessage = m => {
+        //console.log(m);
+        let data = JSON.parse(m.data);
+        let pos = data['position'];
+        let players = data['players'];
+        // visual feedback
+        document.getElementById('avg_pos').textContent = pos.toFixed(2);
+        document.getElementById('num_players').textContent = players + '';
+        document.getElementById('santa').style.rotate = (pos * 90) + 'deg';
+        if (players > num_players) {
+          // player joined: play sound
+          window.dispatchEvent(new CustomEvent('LobbyJoin'));
+        }
+        num_players = players;
+      }
+
+      ws.onclose = _ => {
+        clearInterval(sender);
+        console.error('WS closed, trying to reconnect after ' + backoff + 'ms');
+        setTimeout(_ => {
+          connect(Math.min(backoff * 2, max));
+        }, backoff);
+      }
+    }
+    connect();
 
     var qrcode = null;
     function generateQR(addr) {
